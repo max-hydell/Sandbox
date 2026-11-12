@@ -2,6 +2,8 @@
 import os, unittest
 os.environ.setdefault("SUPABASE_URL","https://example.supabase.co")
 os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY","test-only")
+from unittest.mock import patch, Mock
+from worker import instagram_import as importer
 from worker.instagram_import import parse_cards, story_items
 
 class PicManyParserTests(unittest.TestCase):
@@ -50,5 +52,29 @@ class PicManyParserTests(unittest.TestCase):
     def test_empty_or_unrecognized_story_payload_is_safe(self):
         self.assertEqual(story_items({"ok":True,"data":{"items":[]}}),[])
         self.assertEqual(story_items({"ok":False}),[])
+
+    @patch.object(importer.http, "get")
+    def test_picmany_503_rate_limit_is_hard_stop_without_retry(self, mock_get):
+        response=Mock()
+        response.status_code=503
+        response.headers={"Content-Type":"application/json"}
+        response.json.return_value={"ok":False,"error":{"code":"rate_limited","message":"Public requests are temporarily paused."}}
+        mock_get.return_value=response
+        with patch.object(importer.time, "sleep"):
+            with self.assertRaises(importer.RateLimited):
+                importer.get_public("https://picmany.com/api/profile/test/cards/posts")
+        self.assertEqual(mock_get.call_count,1)
+
+    @patch.object(importer.http, "get")
+    def test_unrecognized_503_is_not_misreported_as_rate_limit(self, mock_get):
+        response=Mock()
+        response.status_code=503
+        response.headers={"Content-Type":"text/html"}
+        response.json.side_effect=ValueError("not JSON")
+        mock_get.return_value=response
+        with patch.object(importer.time, "sleep"):
+            with self.assertRaises(importer.SourceUnavailable):
+                importer.get_public("https://picmany.com/")
+        self.assertEqual(mock_get.call_count,1)
 
 if __name__=="__main__":unittest.main()
