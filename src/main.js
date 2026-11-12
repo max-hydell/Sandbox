@@ -51,18 +51,20 @@ function renderHome(host) {
   <div id="feed-list">${posts.length?posts.filter(p=>!p.liked).map(postCard).join(''):'<div class="empty"><div class="empty-icon">▤</div><h3>Your feed starts here</h3><p>Add a public Instagram username in Watchlist. Posts appear here after a successful public-profile check or import.</p><button class="primary" id="go-watch">Add profiles</button></div>'}</div>`;
   $('#go-watch')?.addEventListener('click',()=>{activeTab='watchlist';render();});
   bindPostActions();
+  hydrateMedia();
 }
 function postCard(p) {
-  const img = p.image_paths?.[0] ? mediaUrl(p.image_paths[0]) : p.image_url || '';
+  const img = p.image_paths?.[0] ? p.image_paths[0] : p.image_url || '';
   return `<article class="post"><div class="post-head"><div class="avatar">${initials(p.username)}</div><div class="post-user"><b>@${esc(p.username)}</b><small>${dateLabel(p.posted_at||p.discovered_at)}</small></div>${p.is_new?'<span class="new-pill">NEW</span>':''}<a class="open-link" href="${esc(p.post_url||'#')}" target="_blank" rel="noreferrer">↗</a></div>
-  ${img?'<img class="post-image" src="'+esc(img)+'" alt="Post by @'+esc(p.username)+'" loading="lazy"/>':'<div class="media-placeholder">MEDIA NOT AVAILABLE</div>'}
+  ${img?(p.image_paths?.[0]?'<img class="post-image" data-media-path="'+esc(img)+'" alt="Post by @'+esc(p.username)+'" loading="lazy"/>':'<img class="post-image" src="'+esc(img)+'" alt="Post by @'+esc(p.username)+'" loading="lazy"/>'):'<div class="media-placeholder">MEDIA NOT AVAILABLE</div>'}
   <div class="post-actions"><button data-like="${p.id}" class="like ${p.liked?'liked':''}">${p.liked?'♥':'♡'} <span>${p.liked?'Liked':'Like'}</span></button><span class="post-type">${esc(p.media_type||'post')}</span></div>
   <p class="caption"><b>@${esc(p.username)}</b> ${esc(p.caption||'')}</p></article>`;
 }
-function mediaUrl(path) { const {data}=supabase.storage.from('instagram-media').getPublicUrl(path); return data.publicUrl; }
+async function hydrateMedia(){for(const img of document.querySelectorAll('[data-media-path]')){const {data,error}=await supabase.storage.from('instagram-media').createSignedUrl(img.dataset.mediaPath,3600);if(!error&&data?.signedUrl)img.src=data.signedUrl;}}
 function bindPostActions(){document.querySelectorAll('[data-like]').forEach(b=>b.addEventListener('click',async()=>{const p=posts.find(x=>x.id===b.dataset.like);if(!p)return;const liked=!p.liked;const {error}=await supabase.from('posts').update({liked}).eq('id',p.id);if(!error){p.liked=liked;render();}}));}
 function renderGrid(host) {
-  host.innerHTML=`<section class="page-head"><div><div class="eyebrow">ARCHIVE</div><h1>Post grid</h1><p>All saved posts, including liked posts</p></div><span class="count">${posts.length} POSTS</span></section><div class="grid-posts">${posts.map(p=>{const img=p.image_paths?.[0]?mediaUrl(p.image_paths[0]):p.image_url||'';return `<a class="grid-tile" href="${esc(p.post_url||'#')}" target="_blank" rel="noreferrer">${img?'<img src="'+esc(img)+'" loading="lazy"/>':'<div class="media-placeholder">NO MEDIA</div>'}${p.is_new?'<i>NEW</i>':''}</a>`}).join('')||'<div class="empty">No saved posts yet.</div>'}</div>`;
+  host.innerHTML=`<section class="page-head"><div><div class="eyebrow">ARCHIVE</div><h1>Post grid</h1><p>All saved posts, including liked posts</p></div><span class="count">${posts.length} POSTS</span></section><div class="grid-posts">${posts.map(p=>{const img=p.image_paths?.[0]?p.image_paths[0]:p.image_url||'';return `<a class="grid-tile" href="${esc(p.post_url||'#')}" target="_blank" rel="noreferrer">${img?(p.image_paths?.[0]?'<img data-media-path="'+esc(img)+'" loading="lazy"/>':'<img src="'+esc(img)+'" loading="lazy"/>'):'<div class="media-placeholder">NO MEDIA</div>'}${p.is_new?'<i>NEW</i>':''}</a>`}).join('')||'<div class="empty">No saved posts yet.</div>'}</div>`;
+  hydrateMedia();
 }
 function renderWatchlist(host) {
   host.innerHTML=`<section class="page-head"><div><div class="eyebrow">PROFILES</div><h1>Watchlist</h1><p>Only public profiles can be checked.</p></div></section>
