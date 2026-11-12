@@ -1,0 +1,14 @@
+{
+  "id": "./",
+  "name": "Sandbox",
+  "short_name": "Sandbox",
+  "description": "Your personal feed for public Instagram profiles.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#09090b",
+  "theme_color": "#09090b",
+  "icons": [
+    { "src": "./sandbox.png", "sizes": "any", "type": "image/png", "purpose": "any" }
+  ]
+}
