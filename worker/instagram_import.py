@@ -18,6 +18,15 @@ logging.basicConfig(level=logging.INFO,format="%(asctime)s %(levelname)s %(messa
 log=logging.getLogger("sandbox-importer")
 http=requests.Session()
 
+class RateLimitPause(Exception):
+    pass
+
+class StopOnLongWait(instaloader.RateController):
+    def sleep(self, secs):
+        if secs > 60:
+            raise RateLimitPause('Instagram requested a long cooldown; stopping this run to respect the limit.')
+        time.sleep(secs)
+
 def rest(method,table,params=None,payload=None,prefer=None):
     h=dict(HEADERS)
     if prefer: h["Prefer"]=prefer
@@ -91,6 +100,8 @@ def check_account(loader,account):
         return added,"active",None
     except ProfileNotExistsException:
         return 0,"not_found","Instagram profile was not found or is unavailable."
+    except RateLimitPause:
+        raise
     except (LoginRequiredException,ConnectionException) as e:
         return 0,"error",f"Instagram blocked the request or required login: {str(e)[:350]}"
     except InstaloaderException as e:
@@ -104,7 +115,8 @@ def main():
       "order":"last_checked_at.asc.nullsfirst,created_at.asc","limit":str(MAX_ACCOUNTS)}) or []
     if not accounts: log.info("No eligible accounts."); return
     loader=instaloader.Instaloader(quiet=True,download_pictures=False,download_videos=False,
-      download_video_thumbnails=False,save_metadata=False,compress_json=False)
+      download_video_thumbnails=False,save_metadata=False,compress_json=False,
+      max_connection_attempts=1,rate_controller=lambda ctx: StopOnLongWait(ctx))
     owners={}
     for a in accounts: owners.setdefault(a["owner_id"],[]).append(a)
     for owner,group in owners.items():
@@ -113,11 +125,22 @@ def main():
         run_id=run[0]["id"] if run else None; checked=found=0; notes=[]; partial=False
         for a in group:
             log.info("Checking @%s",a["username"])
-            added,status,error=check_account(loader,a); checked+=1; found+=added
-            if status=="error": partial=True
-            rest("PATCH","accounts",{"id":f"eq.{a['id']}"},{"status":status,
-              "last_checked_at":datetime.now(timezone.utc).isoformat(),"last_error":error},"return=minimal")
-            notes.append(f"@{a['username']}: {status}, {added} new"+(f" ({error})" if error else ""))
+            try:
+                added,status,error=check_account(loader,a)
+            except RateLimitPause as e:
+                added,status,error=0,'error',str(e)
+                partial=True
+                checked+=1
+                rest('PATCH','accounts',{'id':f"eq.{a['id']}"},{'status':status,
+                  'last_checked_at':datetime.now(timezone.utc).isoformat(),'last_error':error},'return=minimal')
+                notes.append(f"@{a['username']}: stopped for rate limit ({error})")
+                log.warning('%s No further Instagram requests will be made in this run.',error)
+                break
+            checked+=1; found+=added
+            if status=='error': partial=True
+            rest('PATCH','accounts',{'id':f"eq.{a['id']}"},{'status':status,
+              'last_checked_at':datetime.now(timezone.utc).isoformat(),'last_error':error},'return=minimal')
+            notes.append(f"@{a['username']}: {status}, {added} new"+(f" ({error})" if error else ''))
             time.sleep(4)
         if run_id:
             rest("PATCH","runs",{"id":f"eq.{run_id}"},{"finished_at":datetime.now(timezone.utc).isoformat(),

@@ -22,7 +22,7 @@ const statusLabel = (s) => ({active:'Following',private:'Private',not_found:'Not
 
 function shell() {
   $('#app').innerHTML = `
-    <header class="topbar"><div class="brand"><img class="brand-logo" src="/sandbox.png" alt="Sandbox logo"/><img class="brand-wordmark" src="/sandboxtext.png" alt="Sandbox"/></div><button id="refresh" class="icon-btn" aria-label="Refresh feed">↻</button></header>
+    <header class="topbar"><div class="brand"><img class="brand-logo" src="${import.meta.env.BASE_URL}sandbox.png" alt="Sandbox logo"/><img class="brand-wordmark" src="${import.meta.env.BASE_URL}sandboxtext.png" alt="Sandbox"/></div><button id="refresh" class="icon-btn" aria-label="Refresh feed">↻</button></header>
     <main id="content"></main>
     <nav class="bottom-nav">
       <button data-tab="home" class="${activeTab==='home'?'selected':''}"><span>⌂</span>Home</button>
