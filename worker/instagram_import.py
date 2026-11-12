@@ -171,7 +171,9 @@ def upload_media(owner_id,account_id,code,url):
           headers={"apikey":SERVICE_KEY,"Authorization":f"Bearer {SERVICE_KEY}","Content-Type":ctype,"x-upsert":"true"},data=body,timeout=60)
         if u.status_code not in (200,201):log.warning("Storage upload failed %s: %s",code,u.text[:160]);return None
         return path
-    except (requests.RequestException,SourceUnavailable,RateLimited) as e:
+    except RateLimited:
+        raise
+    except (requests.RequestException,SourceUnavailable) as e:
         log.warning("Media not copied for %s: %s",code,e);return None
 
 def save_item(account,item,existing):
@@ -209,6 +211,8 @@ def check_account(account):
         except RateLimited:raise
         except (requests.RequestException,SourceUnavailable) as e:
             notes.append(f"{section} unavailable: {str(e)[:180]}")
+    if not any(note.endswith("checked") for note in notes):
+        raise SourceUnavailable("PicMany did not provide any usable Stories, Posts, or Reels endpoint: " + "; ".join(notes))
     return found,notes
 
 def main():
