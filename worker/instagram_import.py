@@ -242,6 +242,7 @@ def main():
     accounts=rest("GET","accounts",params) or []
     if target and not accounts:raise RuntimeError(f"@{target} is not in the watchlist; no other accounts were selected.")
     if not accounts:log.info("No eligible accounts.");return
+    failed=False
     for account in accounts:
         rate_limited=False
         run=rest("POST","runs",payload={"owner_id":account["owner_id"],"trigger":os.getenv("RUN_TRIGGER","manual"),
@@ -254,14 +255,17 @@ def main():
             status="error";err=str(e);rate_limited=True
             notes.append("Stopped immediately after provider rate-limit/pause response; no further PicMany requests will be made in this run.")
         except Exception as e:
-            status="error";err=str(e)[:450];log.exception("Failed @%s",account["username"])
+            status="error";err=str(e)[:450];failed=True
+            log.exception("Failed @%s",account["username"])
         rest("PATCH","accounts",{"id":f"eq.{account['id']}"},{"status":status,
           "last_checked_at":datetime.now(timezone.utc).isoformat(),"last_error":err}, "return=minimal")
         if run_id:rest("PATCH","runs",{"id":f"eq.{run_id}"},{"finished_at":datetime.now(timezone.utc).isoformat(),
           "accounts_checked":1,"new_posts_found":found,"status":"partial" if err else "completed",
           "notes":"; ".join(notes)[:8000]}, "return=minimal")
         log.info("@%s: %s new items; %s",account["username"],found,"; ".join(notes))
-        if rate_limited:break
+        if rate_limited:failed=True;break
+    if failed:
+        raise RuntimeError("One or more account imports failed. See the account/run error details above; GitHub Actions must not report this import as successful.")
 
 if __name__=="__main__":
     try:main()
