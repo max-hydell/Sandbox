@@ -35,8 +35,10 @@ class RateLimited(Exception): pass
 def make_session():
     s=requests.Session()
     s.headers.update({"User-Agent":"Sandbox-Public-Feed/1.0 (personal authorized integration)","Accept":"text/html,application/json;q=0.9,*/*;q=0.8","Referer":"https://picmany.com/"})
-    retry=Retry(total=3,connect=3,read=2,status=3,backoff_factor=2,
-      status_forcelist=(500,502,503,504),allowed_methods=frozenset(["GET"]),
+    # Never retry 503: PicMany uses it for an explicit public-request pause.
+    # Retrying a pause would ignore the provider's rate-limit signal.
+    retry=Retry(total=2,connect=2,read=1,status=2,backoff_factor=1,
+      status_forcelist=(500,502,504),allowed_methods=frozenset(["GET"]),
       respect_retry_after_header=True,raise_on_status=False)
     s.mount("https://",HTTPAdapter(max_retries=retry))
     return s
@@ -53,6 +55,19 @@ def get_public(url, *, json_expected=False):
     time.sleep(DELAY)
     r=http.get(url,timeout=(10,35))
     if r.status_code==429: raise RateLimited(f"PicMany returned 429 for {url}")
+    if r.status_code==503:
+        # PicMany's observed response explicitly identifies this as a pause.
+        # Treat the provider's 503 pause as a hard stop, not a transient error.
+        try:
+            body=r.json()
+        except ValueError:
+            body={}
+        error=body.get("error",{}) if isinstance(body,dict) else {}
+        code=error.get("code") if isinstance(error,dict) else None
+        message=error.get("message","") if isinstance(error,dict) else ""
+        if code=="rate_limited" or "temporarily paused" in str(message).lower():
+            raise RateLimited(f"PicMany paused public requests (HTTP 503) for {url}")
+        raise SourceUnavailable(f"PicMany returned HTTP 503 without a recognized rate-limit payload for {url}")
     if r.status_code>=500: raise SourceUnavailable(f"PicMany returned {r.status_code} for {url}")
     if r.status_code in (401,403): raise SourceUnavailable(f"PicMany denied public request ({r.status_code}) for {url}")
     r.raise_for_status()
@@ -228,6 +243,7 @@ def main():
     if target and not accounts:raise RuntimeError(f"@{target} is not in the watchlist; no other accounts were selected.")
     if not accounts:log.info("No eligible accounts.");return
     for account in accounts:
+        rate_limited=False
         run=rest("POST","runs",payload={"owner_id":account["owner_id"],"trigger":os.getenv("RUN_TRIGGER","manual"),
           "accounts_checked":0,"new_posts_found":0,"status":"running"},prefer="return=representation")
         run_id=run[0]["id"] if run else None;status="active";err=None;found=0;notes=[]
@@ -235,7 +251,8 @@ def main():
             log.info("Checking @%s via PicMany",account["username"])
             found,notes=check_account(account)
         except RateLimited as e:
-            status="error";err=str(e);notes.append("Stopped immediately after rate limit response.")
+            status="error";err=str(e);rate_limited=True
+            notes.append("Stopped immediately after provider rate-limit/pause response; no further PicMany requests will be made in this run.")
         except Exception as e:
             status="error";err=str(e)[:450];log.exception("Failed @%s",account["username"])
         rest("PATCH","accounts",{"id":f"eq.{account['id']}"},{"status":status,
@@ -244,7 +261,7 @@ def main():
           "accounts_checked":1,"new_posts_found":found,"status":"partial" if err else "completed",
           "notes":"; ".join(notes)[:8000]}, "return=minimal")
         log.info("@%s: %s new items; %s",account["username"],found,"; ".join(notes))
-        if err and "429" in err:break
+        if rate_limited:break
 
 if __name__=="__main__":
     try:main()
