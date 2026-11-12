@@ -4,9 +4,9 @@ on:
     inputs:
       username:
         description: "Optional single username for a safe one-profile test"
-        required: false
+        required: true
         type: string
-        default: ""
+        default: "pickleballdotcom"
 permissions:
   contents: read
 concurrency:
