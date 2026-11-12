@@ -12,7 +12,7 @@ let posts = [];
 let busy = false;
 let activeProfile = null;
 const FEED_CUTOFF = new Date('2026-08-01T00:00:00');
-const afterFeedCutoff = p => { const d = new Date(p.posted_at || p.discovered_at); return Number.isFinite(d.getTime()) && d >= FEED_CUTOFF; };
+const afterFeedCutoff = p => { const d = new Date(p.posted_at); return Number.isFinite(d.getTime()) && d >= FEED_CUTOFF; };
 const feedPosts = () => posts.filter(afterFeedCutoff);
 
 const esc = (v='') => String(v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -30,7 +30,7 @@ function shell() {
       <button data-tab="watchlist" class="${activeTab==='watchlist'?'selected':''}"><span>◎</span>Watchlist</button>
       <button data-tab="settings" class="${activeTab==='settings'?'selected':''}"><span>⚙</span>Settings</button>
     </nav>`;
-  document.querySelectorAll('[data-tab]').forEach(b=>b.addEventListener('click',()=>{activeTab=b.dataset.tab;render();}));
+  document.querySelectorAll('[data-tab]').forEach(b=>b.addEventListener('click',()=>{activeProfile=null;activeTab=b.dataset.tab;render();}));
   $('#refresh').addEventListener('click', refreshFeed);
   render();
 }
@@ -73,7 +73,7 @@ function bindPostActions(){
 function renderProfile(host) {
   const username = activeProfile;
   const account = accounts.find(a=>a.username.toLowerCase()===username.toLowerCase());
-  const profilePosts = posts.filter(p=>p.username.toLowerCase()===username.toLowerCase() && afterFeedCutoff(p));
+  const profilePosts = posts.filter(p=>p.username.toLowerCase()===username.toLowerCase());
   host.innerHTML = '<section class="page-head profile-head"><div><button class="back-link" id="back-feed">← Back</button><div class="eyebrow">PUBLIC PROFILE</div><h1>@'+esc(username)+'</h1><p>Posts published since August 1, 2026</p></div><span class="count">'+profilePosts.length+' POSTS</span></section>' +
     '<div class="profile-summary"><span class="avatar">'+initials(username)+'</span><div><b>@'+esc(username)+'</b><small>'+(account?statusLabel(account.status):'Saved profile')+'</small></div></div>' +
     '<div id="profile-posts">'+(profilePosts.length?profilePosts.map(postCard).join(''):'<div class="empty compact">No saved posts from this profile since August 1, 2026.</div>')+'</div>';
