@@ -22,7 +22,7 @@ PICMANY="https://picmany.com"
 CUTOFF=datetime(2026,8,1,tzinfo=timezone.utc)
 MAX_ACCOUNTS=int(os.getenv("MAX_ACCOUNTS_PER_RUN","8"))
 MAX_ITEMS=int(os.getenv("MAX_ITEMS_PER_PROFILE","30"))
-MAX_PAGES=int(os.getenv("MAX_PAGES_PER_SECTION","4"))
+MAX_PAGES=int(os.getenv("MAX_PAGES_PER_SECTION","1"))
 DELAY=float(os.getenv("PICMANY_REQUEST_DELAY","3"))
 BUCKET="instagram-media"
 DB_HEADERS={"apikey":SERVICE_KEY,"Authorization":f"Bearer {SERVICE_KEY}","Content-Type":"application/json"}
@@ -84,12 +84,12 @@ class CardsParser(HTMLParser):
             self.card["image"]=a.get("src") or a.get("data-src")
         if tag=="time":
             self.card["date"]=a.get("datetime") or a.get("title")
-        if tag=="a" and "by" in cls:
-            self.capture="username";self.buf=[]
+        if tag in ("a","span") and "by" in cls:
+            self.capture="username";self.capture_tag=tag;self.buf=[]
         elif tag=="p" and "body" not in cls:
-            self.capture="caption";self.buf=[]
+            self.capture="caption";self.capture_tag="p";self.buf=[]
     def handle_endtag(self,tag):
-        if self.capture and ((self.capture=="username" and tag=="a") or (self.capture=="caption" and tag=="p")):
+        if self.capture and tag==getattr(self,"capture_tag",None):
             val=" ".join("".join(self.buf).split())
             if self.capture=="username":self.card["username"]=val.lstrip("@") or None
             else:self.card["caption"]=val
@@ -114,7 +114,7 @@ def parse_cards(html, username):
 
 def fetch_cards(username, section):
     cursor=None; all_items=[]; seen=set()
-    for _ in range(MAX_PAGES):
+    for page_number in range(MAX_PAGES):
         url=f"{PICMANY}/api/profile/{username}/cards/{section}"
         if cursor:url+=f"?cursor={requests.utils.quote(cursor,safe='')}"
         response=get_public(url)
@@ -126,6 +126,9 @@ def fetch_cards(username, section):
         m=re.search(r'data-next=["\']([^"\']+)["\']',html)
         cursor=unescape(m.group(1)) if m else None
         if not cursor or len(all_items)>=MAX_ITEMS:break
+        if page_number + 1 >= MAX_PAGES:
+            log.info("@%s %s: additional pages exist; pagination paused until PicMany confirms its cursor contract", username, section)
+            break
     return all_items[:MAX_ITEMS]
 
 def story_items(payload):
