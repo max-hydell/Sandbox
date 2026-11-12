@@ -1,39 +1,35 @@
 # Instagram Feed Sandbox
 
-An independent web app for organizing posts from public Instagram profiles. This repository and its Supabase project are isolated from other projects.
+## Automatic public-profile importer
 
-## Current implementation
+GitHub Actions runs this worker every 6 hours and supports manual runs. It uses Instaloader without an Instagram login. Each run checks up to 12 eligible watchlist profiles, imports up to 12 posts per profile dated on or after August 1, 2026, saves available image/carousel media to the existing private Supabase bucket, and records account status and run history. Accounts marked private are excluded. Posts are deduplicated by the existing unique owner_id + shortcode key.
 
-- Supabase email magic-link authentication
-- Per-user RLS-protected watchlist, post, and run data
-- Add/remove one or many profile usernames
-- Feed, archive grid, local likes, and settings screens
-- Private media bucket support using expiring signed URLs
-- Responsive dark UI
+### Required GitHub secret (one-time setup)
 
-## Run locally
+1. Open https://github.com/max-hydell/Sandbox
+2. Click **Settings**.
+3. In the left sidebar, open **Secrets and variables → Actions**.
+4. Under **Repository secrets**, click **New repository secret**.
+5. Enter the name exactly: **SUPABASE_SERVICE_ROLE_KEY**
+6. In the Secret field, paste the service-role secret key from the Sandbox Supabase project. In Supabase, open **Project Settings → API Keys** and copy the **service_role** secret key (or the newer secret key beginning sb_secret_). Do not use the publishable/anon key.
+7. Click **Add secret**.
 
-1. Copy `.env.example` to `.env.local`.
-2. Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` to the values from the **Sandbox** Supabase project.
-3. Install and run:
+Never send this key in chat, put it in frontend variables, add it to source code, or commit it. It has elevated database access.
 
-   ```sh
-   npm install
-   npm run dev
-   ```
+### Run once to test
 
-4. For a production build: `npm run build`.
+1. Open the repository's **Actions** tab.
+2. Select **Fetch public Instagram posts**.
+3. Click **Run workflow → Run workflow**.
+4. Open the run and inspect the **Import recent public posts** step.
+5. When successful, the log ends with a batch-complete message. Refresh the Sandbox app to see imported posts.
 
-Never put a Supabase service-role key or database password in frontend environment variables.
+The schedule runs every six hours. There are 46 non-private profiles; with 12 checked per run, one full rotation takes about 24 hours. A blocked account is marked error and retried in a later cycle.
 
-## Supabase
+### Limitations
 
-The initial schema and RLS policies are already deployed to project `ocjepneqzdoharttxgxk` in the Sandbox organization. The app expects the `accounts`, `posts`, `runs`, and `notification_log` tables and private `instagram-media` bucket.
+Instaloader is unofficial, not an Instagram-approved API. Instagram may change its site, require login, throttle, or block requests. This worker does not log in, bypass access controls, evade rate limits, or fetch private content. This is best-effort automation, not guaranteed service.
 
-Configure Supabase Auth's Site URL and redirect URLs for the local development URL and the eventual production domain. Enable email OTP/magic links.
+## Frontend
 
-## Important platform limitation
-
-Instagram does not provide an unrestricted public endpoint for continuously reading arbitrary profiles while logged out. This app does **not** log into Instagram, bypass private-account controls, evade rate limits, or use hidden/private APIs. Automatic discovery, reliable carousel/reel extraction, and scheduled checking are not implemented yet. A username in the watchlist is not proof that its posts have been fetched. Those features require a permitted data source or an explicitly supported import workflow.
-
-The original feed's 55-account / 45-post dataset and media files have not been imported because the source export and original media blobs were not supplied to this repository. No historical data has been fabricated.
+The app uses Supabase email magic-link authentication, per-user RLS, feed/archive/profile views, likes, and signed URLs for private media. Configure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY for the frontend. Never expose the service-role key in the browser.
