@@ -10,6 +10,10 @@ let activeTab = 'home';
 let accounts = [];
 let posts = [];
 let busy = false;
+let activeProfile = null;
+const FEED_CUTOFF = new Date('2026-08-01T00:00:00');
+const afterFeedCutoff = p => { const d = new Date(p.posted_at || p.discovered_at); return Number.isFinite(d.getTime()) && d >= FEED_CUTOFF; };
+const feedPosts = () => posts.filter(afterFeedCutoff);
 
 const esc = (v='') => String(v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const initials = (s='?') => esc(s.replace(/^@/,'').slice(0,2).toUpperCase());
@@ -18,7 +22,7 @@ const statusLabel = (s) => ({active:'Following',private:'Private',not_found:'Not
 
 function shell() {
   $('#app').innerHTML = `
-    <header class="topbar"><div class="brand"><span class="brand-mark">◉</span><div><b>feed sandbox</b><small>PUBLIC PROFILES ONLY</small></div></div><button id="refresh" class="icon-btn" aria-label="Refresh feed">↻</button></header>
+    <header class="topbar"><div class="brand"><img class="brand-logo" src="/sandbox.png" alt="Sandbox logo"/><img class="brand-wordmark" src="/sandboxtext.png" alt="Sandbox"/></div><button id="refresh" class="icon-btn" aria-label="Refresh feed">↻</button></header>
     <main id="content"></main>
     <nav class="bottom-nav">
       <button data-tab="home" class="${activeTab==='home'?'selected':''}"><span>⌂</span>Home</button>
@@ -35,6 +39,7 @@ function render() {
   document.querySelectorAll('[data-tab]').forEach(b=>b.classList.toggle('selected',b.dataset.tab===activeTab));
   const host = $('#content');
   if (!session) return renderAuth(host);
+  if (activeProfile) return renderProfile(host);
   if (activeTab==='watchlist') return renderWatchlist(host);
   if (activeTab==='settings') return renderSettings(host);
   if (activeTab==='grid') return renderGrid(host);
@@ -47,21 +52,35 @@ function renderAuth(host) {
 }
 
 function renderHome(host) {
-  host.innerHTML = `<section class="page-head"><div><div class="eyebrow">YOUR FEED</div><h1>Latest posts</h1><p>From public profiles you follow</p></div><span class="count">${posts.length} POSTS</span></section>
-  <div id="feed-list">${posts.length?posts.filter(p=>!p.liked).map(postCard).join(''):'<div class="empty"><div class="empty-icon">▤</div><h3>Your feed starts here</h3><p>Add a public Instagram username in Watchlist. Posts appear here after a successful public-profile check or import.</p><button class="primary" id="go-watch">Add profiles</button></div>'}</div>`;
+  host.innerHTML = `<section class="page-head"><div><div class="eyebrow">YOUR FEED</div><h1>Latest posts</h1><p>Posts published since August 1, 2026</p></div><span class="count">${feedPosts().filter(p=>!p.liked).length} POSTS</span></section>
+  <div id="feed-list">${feedPosts().filter(p=>!p.liked).length?feedPosts().filter(p=>!p.liked).map(postCard).join(''):'<div class="empty"><div class="empty-icon">✓</div><h3>You’re all caught up</h3><p>New posts will appear once a supported public-post source adds them. Liked posts are kept in your archive.</p><button class="primary" id="go-watch">View profiles</button></div>'}</div>`;
   $('#go-watch')?.addEventListener('click',()=>{activeTab='watchlist';render();});
   bindPostActions();
   hydrateMedia();
 }
 function postCard(p) {
   const img = p.image_paths?.[0] ? p.image_paths[0] : p.image_url || '';
-  return `<article class="post"><div class="post-head"><div class="avatar">${initials(p.username)}</div><div class="post-user"><b>@${esc(p.username)}</b><small>${dateLabel(p.posted_at||p.discovered_at)}</small></div>${p.is_new?'<span class="new-pill">NEW</span>':''}<a class="open-link" href="${esc(p.post_url||'#')}" target="_blank" rel="noreferrer">↗</a></div>
+  return `<article class="post"><div class="post-head"><div class="avatar">${initials(p.username)}</div><div class="post-user"><button class="profile-link" data-profile="${esc(p.username)}">@${esc(p.username)}</button><small>${dateLabel(p.posted_at||p.discovered_at)}</small></div>${p.is_new?'<span class="new-pill">NEW</span>':''}<a class="open-link" href="${esc(p.post_url||'#')}" target="_blank" rel="noreferrer">↗</a></div>
   ${img?(p.image_paths?.[0]?'<img class="post-image" data-media-path="'+esc(img)+'" alt="Post by @'+esc(p.username)+'" loading="lazy"/>':'<img class="post-image" src="'+esc(img)+'" alt="Post by @'+esc(p.username)+'" loading="lazy"/>'):'<div class="media-placeholder">MEDIA NOT AVAILABLE</div>'}
   <div class="post-actions"><button data-like="${p.id}" class="like ${p.liked?'liked':''}">${p.liked?'♥':'♡'} <span>${p.liked?'Liked':'Like'}</span></button><span class="post-type">${esc(p.media_type||'post')}</span></div>
   <p class="caption"><b>@${esc(p.username)}</b> ${esc(p.caption||'')}</p></article>`;
 }
 async function hydrateMedia(){for(const img of document.querySelectorAll('[data-media-path]')){const {data,error}=await supabase.storage.from('instagram-media').createSignedUrl(img.dataset.mediaPath,3600);if(!error&&data?.signedUrl)img.src=data.signedUrl;}}
-function bindPostActions(){document.querySelectorAll('[data-like]').forEach(b=>b.addEventListener('click',async()=>{const p=posts.find(x=>x.id===b.dataset.like);if(!p)return;const liked=!p.liked;const {error}=await supabase.from('posts').update({liked}).eq('id',p.id);if(!error){p.liked=liked;render();}}));}
+function bindPostActions(){
+  document.querySelectorAll('[data-like]').forEach(b=>b.addEventListener('click',async()=>{const p=posts.find(x=>x.id===b.dataset.like);if(!p)return;const liked=!p.liked;const {error}=await supabase.from('posts').update({liked}).eq('id',p.id);if(!error){p.liked=liked;render();}}));
+  document.querySelectorAll('[data-profile]').forEach(b=>b.addEventListener('click',()=>{activeProfile=b.dataset.profile;render();}));
+}
+function renderProfile(host) {
+  const username = activeProfile;
+  const account = accounts.find(a=>a.username.toLowerCase()===username.toLowerCase());
+  const profilePosts = posts.filter(p=>p.username.toLowerCase()===username.toLowerCase() && afterFeedCutoff(p));
+  host.innerHTML = '<section class="page-head profile-head"><div><button class="back-link" id="back-feed">← Back</button><div class="eyebrow">PUBLIC PROFILE</div><h1>@'+esc(username)+'</h1><p>Posts published since August 1, 2026</p></div><span class="count">'+profilePosts.length+' POSTS</span></section>' +
+    '<div class="profile-summary"><span class="avatar">'+initials(username)+'</span><div><b>@'+esc(username)+'</b><small>'+(account?statusLabel(account.status):'Saved profile')+'</small></div></div>' +
+    '<div id="profile-posts">'+(profilePosts.length?profilePosts.map(postCard).join(''):'<div class="empty compact">No saved posts from this profile since August 1, 2026.</div>')+'</div>';
+  $('#back-feed').addEventListener('click',()=>{activeProfile=null;render();});
+  bindPostActions();
+  hydrateMedia();
+}
 function renderGrid(host) {
   host.innerHTML=`<section class="page-head"><div><div class="eyebrow">ARCHIVE</div><h1>Post grid</h1><p>All saved posts, including liked posts</p></div><span class="count">${posts.length} POSTS</span></section><div class="grid-posts">${posts.map(p=>{const img=p.image_paths?.[0]?p.image_paths[0]:p.image_url||'';return `<a class="grid-tile" href="${esc(p.post_url||'#')}" target="_blank" rel="noreferrer">${img?(p.image_paths?.[0]?'<img data-media-path="'+esc(img)+'" loading="lazy"/>':'<img src="'+esc(img)+'" loading="lazy"/>'):'<div class="media-placeholder">NO MEDIA</div>'}${p.is_new?'<i>NEW</i>':''}</a>`}).join('')||'<div class="empty">No saved posts yet.</div>'}</div>`;
   hydrateMedia();
@@ -70,9 +89,10 @@ function renderWatchlist(host) {
   host.innerHTML=`<section class="page-head"><div><div class="eyebrow">PROFILES</div><h1>Watchlist</h1><p>Only public profiles can be checked.</p></div></section>
   <form id="add-form" class="add-form"><input id="username" placeholder="Instagram username" autocomplete="off" required/><button class="primary" type="submit">Add</button></form>
   <form id="bulk-form" class="bulk-form"><textarea id="bulk-usernames" rows="2" placeholder="Add multiple usernames, separated by commas or new lines"></textarea><button class="secondary" type="submit">Add multiple</button></form>
-  <div class="profile-list">${accounts.map(a=>`<div class="profile-row"><div class="avatar">${initials(a.username)}</div><div class="profile-info"><b>@${esc(a.username)}</b><small>${statusLabel(a.status)} ${a.last_checked_at?'· Checked '+dateLabel(a.last_checked_at):''}</small></div><button class="remove" data-remove="${a.id}" aria-label="Remove @${esc(a.username)}">×</button></div>`).join('')||'<div class="empty compact">No profiles added yet.</div>'}</div><p id="watch-msg" class="muted"></p>`;
+  <p class="muted source-note">Profiles stay Pending until a supported public-post source is connected. Adding a username alone does not fetch posts.</p><div class="profile-list">${accounts.map(a=>`<div class="profile-row"><div class="avatar">${initials(a.username)}</div><div class="profile-info"><button class="profile-link" data-profile="${esc(a.username)}">@${esc(a.username)}</button><small>${statusLabel(a.status)} ${a.last_checked_at?'· Checked '+dateLabel(a.last_checked_at):''}</small></div><button class="remove" data-remove="${a.id}" aria-label="Remove @${esc(a.username)}">×</button></div>`).join('')||'<div class="empty compact">No profiles added yet.</div>'}</div><p id="watch-msg" class="muted"></p>`;
   $('#add-form').addEventListener('submit',async e=>{e.preventDefault();await addNames([$('#username').value]);});
   $('#bulk-form').addEventListener('submit',async e=>{e.preventDefault();await addNames($('#bulk-usernames').value.split(/[\s,]+/));});
+  document.querySelectorAll('[data-profile]').forEach(b=>b.addEventListener('click',()=>{activeProfile=b.dataset.profile;render();}));
   document.querySelectorAll('[data-remove]').forEach(b=>b.addEventListener('click',async()=>{const {error}=await supabase.from('accounts').delete().eq('id',b.dataset.remove);if(error)alert(error.message);else await loadData();}));
 }
 async function addNames(names){const clean=[...new Set(names.map(x=>x.trim().replace(/^@/, '').toLowerCase()).filter(x=>/^[a-z0-9._]{1,30}$/.test(x)))];if(!clean.length)return;const {error}=await supabase.from('accounts').upsert(clean.map(username=>({owner_id:session.user.id,username,status:'pending'})),{onConflict:'owner_id,username',ignoreDuplicates:true});$('#watch-msg').textContent=error?error.message:`Added ${clean.length} profile(s). Profile checking is not yet connected; only verified public posts will be saved.`;await loadData();}
