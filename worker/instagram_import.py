@@ -9,7 +9,7 @@ import json, logging, os, re, sys, time
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from html.parser import HTMLParser
-from urllib.parse import urljoin
+from urllib.parse import urljoin\nfrom html import unescape
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -123,7 +123,7 @@ def fetch_cards(username, section):
             if item["shortcode"] not in seen:
                 seen.add(item["shortcode"]);all_items.append(item)
         m=re.search(r'data-next=["\']([^"\']+)["\']',html)
-        cursor=m.group(1) if m else None
+        cursor=unescape(m.group(1)) if m else None
         if not cursor or len(all_items)>=MAX_ITEMS:break
     return all_items[:MAX_ITEMS]
 
@@ -182,7 +182,7 @@ def save_item(account,item,existing):
     row={"owner_id":account["owner_id"],"account_id":account["id"],"shortcode":code,
       "post_url":item.get("post_url") or None,"posted_at":posted.isoformat() if posted else datetime.now(timezone.utc).isoformat(),
       "media_type":item["media_type"],"caption":item.get("caption","")[:5000],
-      "image_paths":[path] if path else [],"is_new":True,"liked":False}
+      "image_paths":[path] if path else [],"is_new":True,"liked":False,\n      "expires_at":(posted.replace(tzinfo=timezone.utc) if posted else datetime.now(timezone.utc)).isoformat() if item["media_type"]=="story" else None}
     rest("POST","posts",{"on_conflict":"owner_id,shortcode"},row,"resolution=ignore-duplicates,return=minimal")
     existing.add(code);return True
 
