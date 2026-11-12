@@ -22,6 +22,21 @@ class PicManyParserTests(unittest.TestCase):
         self.assertEqual(rows[1]["media_type"],"post")
         self.assertEqual(rows[1]["image_url"],"https://picmany.com/i/photo.jpg")
 
+    def test_live_picmany_card_markup_with_username_span(self):
+        html='''<article class="media-card"><a href="/reel/DbhetwTuyst">
+        <img src="/i/thumb.jpg" alt="Video by Pickleball.com on August 01, 2026."></a>
+        <div class="body"><span class="by truncate">@pickleballdotcom</span>
+        <p dir="auto">This point is one for the books 🤯😳</p>
+        <div class="media-meta"><time datetime="2026-08-02T03:45:39.000Z">Aug 2, 2026</time></div>
+        </div></article>'''
+        rows=parse_cards(html,"fallback")
+        self.assertEqual(len(rows),1)
+        self.assertEqual(rows[0]["username"],"pickleballdotcom")
+        self.assertEqual(rows[0]["shortcode"],"DbhetwTuyst")
+        self.assertEqual(rows[0]["media_type"],"reel")
+        self.assertEqual(rows[0]["caption"],"This point is one for the books 🤯😳")
+        self.assertEqual(rows[0]["posted_at"],"2026-08-02T03:45:39+00:00")
+
     def test_story_json_common_envelope(self):
         payload={"ok":True,"data":{"items":[{"id":"story-1","type":"image",
           "publishedAt":"2026-11-12T12:00:00Z","imageUrl":"https://cdn.example/story.jpg",
