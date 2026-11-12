@@ -127,6 +127,57 @@ for index, (name, url) in enumerate(TESTS):
         time.sleep(2)
     results.append(run_one(name, url))
 
+
+# Verify the exact cursor parameter the importer intends to use. Only one next-page
+# request per section is made, and only when PicMany advertises a cursor.
+class CardLinks(HTMLParser):
+    def __init__(self):
+        super().__init__(); self.links=[]
+    def handle_starttag(self, tag, attrs):
+        if tag=="a":
+            href=dict(attrs).get("href","")
+            if href.startswith(("/p/","/reel/","/tv/")): self.links.append(href)
+
+def probe_pagination(section):
+    base=f"https://picmany.com/api/profile/{quote(USERNAME)}/cards/{section}"
+    row={"name":f"pagination_{section}","base_url":base}
+    try:
+        with urlopen(Request(base,headers=HEADERS),timeout=20) as response:
+            first=response.read(MAX_BYTES).decode("utf-8","replace")
+        cursor_match=re.search(r'data-next=["\\']([^"\\']+)["\\']',first)
+        if not cursor_match:
+            row["result"]="no_next_cursor_advertised"
+            return row
+        cursor=cursor_match.group(1)
+        parser=CardLinks();parser.feed(first)
+        first_links=list(dict.fromkeys(parser.links))
+        from urllib.parse import urlencode
+        next_url=base+"?"+urlencode({"cursor":cursor})
+        with urlopen(Request(next_url,headers=HEADERS),timeout=20) as response:
+            second=response.read(MAX_BYTES).decode("utf-8","replace")
+            row["next_status"]=response.status
+            row["next_content_type"]=response.headers.get("Content-Type")
+        parser2=CardLinks();parser2.feed(second)
+        second_links=list(dict.fromkeys(parser2.links))
+        row.update({
+            "result":"cursor_request_tested",
+            "first_page_item_links":len(first_links),
+            "second_page_item_links":len(second_links),
+            "overlap_count":len(set(first_links)&set(second_links)),
+            "new_second_page_links":len(set(second_links)-set(first_links)),
+            "second_page_has_cursor":bool(re.search(r'data-next=["\\']([^"\\']+)["\\']',second)),
+            "query_parameter_tested":"cursor",
+        })
+    except HTTPError as exc:
+        row.update({"result":"http_error","status":exc.code,"body_preview":exc.read(300).decode("utf-8","replace")})
+    except Exception as exc:
+        row.update({"result":"error","error":str(exc)[:250]})
+    return row
+
+for section in ("posts","reels"):
+    time.sleep(2)
+    results.append(probe_pagination(section))
+
 summary = {
     "username": USERNAME,
     "client": "plain Python HTTP; no browser, login, cookies, retries, or challenge handling",
