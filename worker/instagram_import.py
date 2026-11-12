@@ -9,7 +9,8 @@ import json, logging, os, re, sys, time
 from datetime import datetime, timezone, timedelta
 from email.utils import parsedate_to_datetime
 from html.parser import HTMLParser
-from urllib.parse import urljoin\nfrom html import unescape
+from urllib.parse import urljoin
+from html import unescape
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
