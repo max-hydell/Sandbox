@@ -81,6 +81,10 @@ def inspect_body(name, content_type, body):
             "reel_links": "/reel/" in low,
             "login_wall": "login" in low and ("log in" in low or "accounts/login" in low),
         }
+        card_start = low.find("<article")
+        card_end = low.find("</article>", card_start)
+        if card_start >= 0:
+            result["first_card_html"] = re.sub(r"\\s+", " ", sample[card_start:card_end+10 if card_end >= 0 else card_start+2500])[:2500]
     return result
 
 def run_one(name, url):
