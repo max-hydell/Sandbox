@@ -43,7 +43,7 @@ function render() {
 
 function renderAuth(host) {
   host.innerHTML = `<section class="auth-card"><div class="eyebrow">YOUR PRIVATE VIEW</div><h1>See the posts<br/>you care about.</h1><p>Follow public Instagram profiles in one clean feed. No Instagram login, no real engagement, and no private-account access.</p><form id="auth-form"><label>Email address</label><input id="email" type="email" placeholder="you@example.com" required/><button class="primary" type="submit">Send sign-in link</button></form><p id="auth-msg" class="muted">A magic link will sign you into your own private workspace.</p></section>`;
-  $('#auth-form').addEventListener('submit', async e=>{e.preventDefault();const email=$('#email').value.trim();const {error}=await supabase.auth.signInWithOtp({email,options:{emailRedirectTo:location.origin}});$('#auth-msg').textContent=error?error.message:'Check your email for your sign-in link.';});
+  $('#auth-form').addEventListener('submit', async e=>{e.preventDefault();const email=$('#email').value.trim();const {error}=await supabase.auth.signInWithOtp({email,options:{emailRedirectTo:location.origin+import.meta.env.BASE_URL}});$('#auth-msg').textContent=error?error.message:'Check your email for your sign-in link.';});
 }
 
 function renderHome(host) {
