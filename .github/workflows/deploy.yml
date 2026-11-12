@@ -20,7 +20,7 @@ jobs:
           node-version: 22
       - uses: actions/configure-pages@v5
       - name: Install dependencies
-        run: npm ci
+        run: npm install
       - name: Build site
         run: npm run build
       - name: Upload Pages artifact
