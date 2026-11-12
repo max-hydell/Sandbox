@@ -21,7 +21,7 @@ jobs:
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       MAX_ACCOUNTS_PER_RUN: "12"
       MAX_ITEMS_PER_PROFILE: "30"
-      MAX_PAGES_PER_SECTION: "4"
+      MAX_PAGES_PER_SECTION: "1"
       PICMANY_REQUEST_DELAY: "3"
       TARGET_USERNAME: ${{ inputs.username }}
       RUN_TRIGGER: ${{ github.event_name }}
