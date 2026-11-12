@@ -148,7 +148,7 @@ def probe_pagination(section):
     try:
         with urlopen(Request(base,headers=HEADERS),timeout=20) as response:
             first=response.read(MAX_BYTES).decode("utf-8","replace")
-        cursor_match=re.search(r"""data-next=["']([^"']+)["']""",first)
+        cursor_match=re.search('data-next="([^"]+)"', first)
         if not cursor_match:
             row["result"]="no_next_cursor_advertised"
             return row
@@ -169,7 +169,7 @@ def probe_pagination(section):
             "second_page_item_links":len(second_links),
             "overlap_count":len(set(first_links)&set(second_links)),
             "new_second_page_links":len(set(second_links)-set(first_links)),
-            "second_page_has_cursor":bool(re.search(r"""data-next=["']([^"']+)["']""",second)),
+            "second_page_has_cursor":bool(re.search('data-next="([^"]+)"', second)),
             "query_parameter_tested":"cursor",
         })
     except HTTPError as exc:
