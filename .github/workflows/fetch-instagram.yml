@@ -1,7 +1,6 @@
 name: Fetch public Instagram posts
 on:
-  schedule:
-    - cron: "17 */6 * * *"
+  # Automatic polling is paused until a supported public-post source is verified.
   workflow_dispatch:
 permissions:
   contents: read
