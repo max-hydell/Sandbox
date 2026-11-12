@@ -21,8 +21,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - uses: actions/configure-pages@v5
       - run: npm install
-      - uses: actions/configure-pages@v5\n      - run: npm run build
+      - run: npm run build
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
