@@ -183,7 +183,8 @@ def save_item(account,item,existing):
     row={"owner_id":account["owner_id"],"account_id":account["id"],"shortcode":code,
       "post_url":item.get("post_url") or None,"posted_at":posted.isoformat() if posted else datetime.now(timezone.utc).isoformat(),
       "media_type":item["media_type"],"caption":item.get("caption","")[:5000],
-      "image_paths":[path] if path else [],"is_new":True,"liked":False,\n      "expires_at":((posted or datetime.now(timezone.utc)) + timedelta(hours=24)).isoformat() if item["media_type"]=="story" else None}
+      "image_paths":[path] if path else [],"is_new":True,"liked":False,
+      "expires_at":((posted or datetime.now(timezone.utc)) + timedelta(hours=24)).isoformat() if item["media_type"]=="story" else None}
     rest("POST","posts",{"on_conflict":"owner_id,shortcode"},row,"resolution=ignore-duplicates,return=minimal")
     existing.add(code);return True
 
