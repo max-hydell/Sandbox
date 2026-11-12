@@ -1,0 +1,27 @@
+name: Test PicMany public JSON endpoint
+on:
+  workflow_dispatch:
+    inputs:
+      username:
+        description: "Public PicMany username (without @)"
+        required: true
+        type: string
+        default: "pickleballdotcom"
+permissions:
+  contents: read
+concurrency:
+  group: picmany-json-test
+  cancel-in-progress: false
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    env:
+      TARGET_USERNAME: ${{ inputs.username }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Test ordinary public GET (no browser, cookies, or challenge handling)
+        run: python worker/picmany_api_test.py
