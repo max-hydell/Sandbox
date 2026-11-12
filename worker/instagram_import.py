@@ -111,8 +111,18 @@ def check_account(loader,account):
         return 0,"error",str(e)[:450]
 
 def main():
-    accounts=rest("GET","accounts",{"select":"id,owner_id,username,status,last_checked_at","status":"not.eq.private",
-      "order":"last_checked_at.asc.nullsfirst,created_at.asc","limit":str(MAX_ACCOUNTS)}) or []
+    target_username=os.getenv("TARGET_USERNAME","").strip().lstrip("@").lower()
+    if target_username:
+        if not target_username.replace("_","").replace(".","").isalnum():
+            raise ValueError("TARGET_USERNAME must be a single Instagram username.")
+        accounts=rest("GET","accounts",{"select":"id,owner_id,username,status,last_checked_at",
+          "username":f"eq.{target_username}","status":"not.eq.private","limit":"1"}) or []
+        if not accounts:
+            raise RuntimeError(f"Target account @{target_username} was not found or is marked private; no other accounts were selected.")
+        log.info("Single-account test mode: only @%s will be checked.",target_username)
+    else:
+        accounts=rest("GET","accounts",{"select":"id,owner_id,username,status,last_checked_at","status":"not.eq.private",
+          "order":"last_checked_at.asc.nullsfirst,created_at.asc","limit":str(MAX_ACCOUNTS)}) or []
     if not accounts: log.info("No eligible accounts."); return
     loader=instaloader.Instaloader(quiet=True,download_pictures=False,download_videos=False,
       download_video_thumbnails=False,save_metadata=False,compress_json=False,
