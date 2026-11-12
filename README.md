@@ -1,35 +1,34 @@
 # Instagram Feed Sandbox
 
-## Automatic public-profile importer
+## Public PicMany importer
 
-GitHub Actions runs this worker every 6 hours and supports manual runs. It uses Instaloader without an Instagram login. Each run checks up to 12 eligible watchlist profiles, imports up to 12 posts per profile dated on or after August 1, 2026, saves available image/carousel media to the existing private Supabase bucket, and records account status and run history. Accounts marked private are excluded. Posts are deduplicated by the existing unique owner_id + shortcode key.
+Sandbox now imports public profile cards from PicMany using ordinary HTTP GET requests. It checks the public Stories JSON endpoint and the public Posts/Reels card endpoints, parses the visible card data, follows the supplied pagination cursor, deduplicates by owner + content shortcode, and stores available image thumbnails in the existing private Supabase Storage bucket.
 
-### Required GitHub secret (one-time setup)
+The importer is currently **manual-only** while the PicMany response formats are validated against live accounts. It does not use Instagram login, private content, browser automation, cookies, challenge handling, proxy rotation, or rate-limit bypasses. Temporary 5xx responses are retried with backoff; a 429 stops the run rather than attempting to evade the limit.
 
-1. Open https://github.com/max-hydell/Sandbox
-2. Click **Settings**.
-3. In the left sidebar, open **Secrets and variables → Actions**.
-4. Under **Repository secrets**, click **New repository secret**.
-5. Enter the name exactly: **SUPABASE_SERVICE_ROLE_KEY**
-6. In the Secret field, paste the service-role secret key from the Sandbox Supabase project. In Supabase, open **Project Settings → API Keys** and copy the **service_role** secret key (or the newer secret key beginning sb_secret_). Do not use the publishable/anon key.
-7. Click **Add secret**.
+### Required GitHub secret
 
-Never send this key in chat, put it in frontend variables, add it to source code, or commit it. It has elevated database access.
+The repository needs `SUPABASE_SERVICE_ROLE_KEY` under **Settings → Secrets and variables → Actions**. Use the Sandbox project's service-role/secret key. Never expose it in frontend code or commit it.
 
-### Run once to test
+### Test the importer
 
 1. Open the repository's **Actions** tab.
-2. Select **Fetch public Instagram posts**.
-3. Click **Run workflow → Run workflow**.
-4. Open the run and inspect the **Import recent public posts** step.
-5. When successful, the log ends with a batch-complete message. Refresh the Sandbox app to see imported posts.
+2. Select **Fetch public PicMany posts**.
+3. Click **Run workflow**.
+4. For a single-account test, enter a username that is already in the Sandbox watchlist. Leave it blank to process the normal batch.
+5. Review the import log and confirm the run summary and newly inserted rows in Supabase.
 
-The schedule runs every six hours. There are 46 non-private profiles; with 12 checked per run, one full rotation takes about 24 hours. A blocked account is marked error and retried in a later cycle.
+The workflow runs parser regression tests before it imports anything. The scheduled cron remains disabled until the live importer has been confirmed against actual PicMany responses.
 
-### Limitations
+### Current coverage and limitations
 
-Instaloader is unofficial, not an Instagram-approved API. Instagram may change its site, require login, throttle, or block requests. This worker does not log in, bypass access controls, evade rate limits, or fetch private content. This is best-effort automation, not guaranteed service.
+- Posts and Reels: public card HTML, thumbnails, captions, timestamps, and pagination.
+- Stories: best-effort JSON parsing; the exact response schema must be confirmed against the live endpoint before relying on it.
+- Highlights: not enabled yet because no confirmed Highlights endpoint/response was supplied.
+- Video playback/download: not yet implemented; Reels currently appear with their available thumbnail and link to PicMany.
+- Stories are marked to expire 24 hours after their published timestamp and are hidden from the live feed after expiry.
+- PicMany can change its public page structure, return temporary errors, or limit requests. The importer is best-effort and respects 429 responses.
 
 ## Frontend
 
-The app uses Supabase email magic-link authentication, per-user RLS, feed/archive/profile views, likes, and signed URLs for private media. Configure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY for the frontend. Never expose the service-role key in the browser.
+The app uses Supabase email magic-link authentication, per-user RLS, feed/archive/profile views, likes, and signed URLs for private media. Configure `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` for the frontend. Never expose the service-role key in the browser.
