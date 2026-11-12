@@ -13,7 +13,7 @@ let busy = false;
 let activeProfile = null;
 const FEED_CUTOFF = new Date('2026-08-01T00:00:00');
 const afterFeedCutoff = p => { const d = new Date(p.posted_at); return Number.isFinite(d.getTime()) && d >= FEED_CUTOFF; };
-const feedPosts = () => posts.filter(afterFeedCutoff);
+const feedPosts = () => posts.filter(p => afterFeedCutoff(p) && !(p.media_type === 'story' && p.expires_at && new Date(p.expires_at) <= new Date()));
 
 const esc = (v='') => String(v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const initials = (s='?') => esc(s.replace(/^@/,'').slice(0,2).toUpperCase());
@@ -52,7 +52,7 @@ function renderAuth(host) {
 }
 
 function renderHome(host) {
-  host.innerHTML = `<section class="page-head"><div><div class="eyebrow">YOUR FEED</div><h1>Latest posts</h1><p>Posts published since August 1, 2026</p></div><span class="count">${feedPosts().filter(p=>!p.liked).length} POSTS</span></section>
+  host.innerHTML = `<section class="page-head"><div><div class="eyebrow">YOUR FEED</div><h1>Latest posts</h1><p>Posts and Stories published since August 1, 2026</p></div><span class="count">${feedPosts().filter(p=>!p.liked).length} POSTS</span></section>
   <div id="feed-list">${feedPosts().filter(p=>!p.liked).length?feedPosts().filter(p=>!p.liked).map(postCard).join(''):'<div class="empty"><div class="empty-icon">✓</div><h3>You’re all caught up</h3><p>New posts will appear once a supported public-post source adds them. Liked posts are kept in your archive.</p><button class="primary" id="go-watch">View profiles</button></div>'}</div>`;
   $('#go-watch')?.addEventListener('click',()=>{activeTab='watchlist';render();});
   bindPostActions();
