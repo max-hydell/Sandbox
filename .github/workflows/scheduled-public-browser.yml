@@ -10,6 +10,11 @@ on:
         required: true
         type: string
         default: "nate_bestic"
+      max_posts:
+        description: "Maximum recent visible posts to inspect (1-30)"
+        required: true
+        type: number
+        default: 12
 
 permissions:
   contents: read
@@ -21,9 +26,10 @@ concurrency:
 jobs:
   collect:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 15
     env:
       TARGET_USERNAME: ${{ github.event.inputs.username || 'nate_bestic' }}
+      MAX_POSTS: ${{ github.event.inputs.max_posts || '12' }}
       PYTHONUNBUFFERED: "1"
     steps:
       - uses: actions/checkout@v4
@@ -31,20 +37,21 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: "pip"
 
       - name: Install browser
         run: |
           python -m pip install --upgrade playwright
           python -m playwright install --with-deps chromium
 
-      - name: Inspect public profile and newest visible posts
+      - name: Inspect public profile, posts, and visible carousel slides
         run: python worker/public_browser_collector.py
 
-      - name: Upload screenshots and extraction report
+      - name: Upload extraction report and browser evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: public-browser-${{ env.TARGET_USERNAME }}-${{ github.run_id }}
           path: artifacts/public-browser/
           if-no-files-found: warn
-          retention-days: 7
+          retention-days: 14
