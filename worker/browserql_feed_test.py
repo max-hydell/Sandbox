@@ -17,6 +17,12 @@ query = """
 mutation PublicProfileHTML {
   goto(url: "%s", waitUntil: domContentLoaded) { status }
   waitForTimeout(time: 3500) { time }
+  ifCloseSignup: if(selector: "svg[aria-label='Close']") {
+    closeSignup: click(selector: "svg[aria-label='Close']", visible: true, timeout: 5000) {
+      time
+    }
+  }
+  waitForTimeout(time: 1200) { time }
   html { html }
 }
 """ % profile_url
