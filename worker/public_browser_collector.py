@@ -1,231 +1,315 @@
 #!/usr/bin/env python3
-"""Anonymous, read-only Instagram browser diagnostics with full-session evidence.
+"""Public Instagram profile/post collector.
 
-No login, cookies, saved browser profile, proxy, CAPTCHA solving, media downloads,
-or database writes. Video/screenshots document only what the public browser sees.
+Reads only what Instagram renders to an ordinary logged-out browser. It does not
+import/export cookies, log in, use proxies, solve challenges, or evade rate limits.
+It records metadata and media URLs; it does not download media or write to a DB.
 """
+from __future__ import annotations
+
+import argparse
 import json
 import os
 import re
-import shutil
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 
-USERNAME = re.sub(r"[^A-Za-z0-9._]", "", os.getenv("TARGET_USERNAME", "nate_bestic"))[:30]
-if not USERNAME:
-    raise SystemExit("TARGET_USERNAME is empty after validation")
-
-OUT = Path("artifacts/public-browser")
-OUT.mkdir(parents=True, exist_ok=True)
-PROFILE_URL = f"https://www.instagram.com/{USERNAME}/"
-MAX_POSTS = 12
-events = []
-screenshots = []
+USERNAME_RE = re.compile(r"^[A-Za-z0-9._]{1,30}$")
+MAX_POSTS = int(os.getenv("MAX_POSTS", "12"))
+MAX_CAROUSEL_SLIDES = int(os.getenv("MAX_CAROUSEL_SLIDES", "20"))
+POST_WAIT_MS = int(os.getenv("POST_WAIT_MS", "1800"))
+OUT = Path(os.getenv("OUTPUT_DIR", "artifacts/public-browser"))
+PROFILE_URL_TEMPLATE = "https://www.instagram.com/{username}/"
 
 
-def stamp():
+def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def screenshot(page, name):
-    path = OUT / name
-    try:
-        page.screenshot(path=str(path), full_page=True, animations="disabled", timeout=15000)
-        screenshots.append({"time": stamp(), "file": str(path), "url": page.url})
-    except Exception as exc:
-        events.append({"time": stamp(), "type": "screenshot_error", "file": name, "error": repr(exc)})
+def normalize_username(value: str) -> str:
+    value = value.strip().lstrip("@")
+    if not USERNAME_RE.fullmatch(value):
+        raise ValueError("Username must contain only letters, numbers, periods, or underscores (1-30 chars).")
+    return value
 
 
-def is_login_wall(page):
-    current = page.url.lower()
+def belongs_to_profile(href: str, username: str) -> bool:
     try:
-        text = page.locator("body").inner_text(timeout=4000)[:3000].lower()
+        path = urlparse(href).path.strip("/").split("/")
+        return len(path) >= 2 and path[0].lower() == username.lower() and path[1] in {"p", "reel", "tv"} and bool(path[2] if len(path) > 2 else "")
     except Exception:
-        text = ""
-    return (
-        "accounts/login" in current
-        or "challenge/" in current
-        or "captcha" in text
-        or "log in to instagram" in text
-        or "log in or sign up" in text
-    )
+        return False
+
+
+def unique(values):
+    seen, output = set(), []
+    for value in values:
+        if value and value not in seen:
+            seen.add(value)
+            output.append(value)
+    return output
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Inspect public Instagram posts anonymously.")
+    parser.add_argument("--username", default=os.getenv("TARGET_USERNAME", "nate_bestic"))
+    parser.add_argument("--headed", action="store_true", help="Show Chromium locally.")
+    parser.add_argument("--max-posts", type=int, default=MAX_POSTS)
+    args = parser.parse_args()
+    username = normalize_username(args.username)
+    max_posts = max(1, min(args.max_posts, 30))
+    OUT.mkdir(parents=True, exist_ok=True)
+
     result = {
-        "username": USERNAME,
-        "profile_url": PROFILE_URL,
-        "started_at_utc": stamp(),
-        "mode": "anonymous_public_browser_read_only",
+        "username": username,
+        "requested_profile_url": PROFILE_URL_TEMPLATE.format(username=username),
+        "started_at_utc": utc_now(),
+        "mode": "anonymous_public_browser",
+        "headed": bool(args.headed),
         "login_used": False,
         "cookies_imported": False,
-        "saved_browser_profile": False,
-        "proxy_or_captcha_bypass": False,
+        "cookies_exported": False,
         "media_downloads": False,
         "database_writes": False,
         "posts": [],
+        "warnings": [],
     }
-    video_path = None
-    trace_path = OUT / "playwright-trace.zip"
+    events = []
+    screenshots = []
+    rate_limited = False
+
+    def record_screenshot(page, filename):
+        try:
+            path = OUT / filename
+            page.screenshot(path=str(path), full_page=True, animations="disabled", timeout=12000)
+            screenshots.append(str(path))
+        except Exception as exc:
+            result["warnings"].append(f"Screenshot {filename} failed: {str(exc)[:200]}")
+
+    def login_wall(page):
+        url = page.url.lower()
+        try:
+            text = page.locator("body").inner_text(timeout=2500).lower()[:2500]
+        except Exception:
+            text = ""
+        return (
+            "/accounts/login" in url
+            or "/challenge/" in url
+            or "log in to instagram" in text
+            or "log in or sign up" in text
+        )
+
+    def close_signup_overlay(page):
+        # Dismiss only a visible, ordinary close control on the signup modal.
+        selectors = [
+            '[role="dialog"] button[aria-label="Close"]',
+            '[role="dialog"] [aria-label="Close"]',
+            'button[aria-label="Close"]',
+        ]
+        for selector in selectors:
+            try:
+                locator = page.locator(selector).first
+                if locator.is_visible(timeout=700):
+                    locator.click(timeout=1500)
+                    page.wait_for_timeout(400)
+                    events.append({"time": utc_now(), "type": "signup_overlay_closed", "selector": selector})
+                    return True
+            except Exception:
+                pass
+        return False
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        browser = p.chromium.launch(headless=not args.headed)
         context = browser.new_context(
             viewport={"width": 1440, "height": 1000},
-            record_video_dir=str(OUT / "video-temp"),
-            record_video_size={"width": 1440, "height": 1000},
             locale="en-US",
             timezone_id="America/New_York",
         )
         context.tracing.start(screenshots=True, snapshots=True, sources=True)
         page = context.new_page()
-        page_video = page.video
+        page.set_default_timeout(8000)
 
         def on_response(response):
+            nonlocal rate_limited
             host = urlparse(response.url).hostname or ""
-            if any(domain in host for domain in ("instagram.com", "cdninstagram.com", "fbcdn.net")):
-                item = {"time": stamp(), "type": "response", "status": response.status,
-                        "host": host, "url": response.url[:700]}
+            if "instagram.com" in host or "cdninstagram.com" in host or "fbcdn.net" in host:
+                item = {"time": utc_now(), "status": response.status, "url": response.url[:900]}
                 events.append(item)
-                print(json.dumps(item), flush=True)
-
-        def on_request_failed(request):
-            host = urlparse(request.url).hostname or ""
-            if any(domain in host for domain in ("instagram.com", "cdninstagram.com", "fbcdn.net")):
-                item = {"time": stamp(), "type": "request_failed", "host": host,
-                        "error": request.failure, "url": request.url[:700]}
-                events.append(item)
-                print(json.dumps(item), flush=True)
+                if response.status == 429:
+                    rate_limited = True
+                    result["warnings"].append("Instagram returned HTTP 429. Collection stopped immediately; no retry was attempted.")
 
         page.on("response", on_response)
-        page.on("requestfailed", on_request_failed)
-        page.on("console", lambda msg: events.append({
-            "time": stamp(), "type": "console", "level": msg.type, "text": msg.text[:1000]
-        }) if msg.type == "error" else None)
-        page.on("pageerror", lambda exc: events.append({
-            "time": stamp(), "type": "page_error", "error": repr(exc)[:1200]
-        }))
+        page.on("requestfailed", lambda req: events.append({
+            "time": utc_now(), "type": "request_failed", "url": req.url[:900], "error": req.failure
+        }) if "instagram.com" in (urlparse(req.url).hostname or "") else None)
 
         try:
-            events.append({"time": stamp(), "type": "browser_started", "url": PROFILE_URL})
-            screenshot(page, "00-before-navigation.png")
-            response = page.goto(PROFILE_URL, wait_until="domcontentloaded", timeout=45000)
+            record_screenshot(page, "00-before-navigation.png")
+            response = page.goto(result["requested_profile_url"], wait_until="domcontentloaded", timeout=45000)
             result["profile_http_status"] = response.status if response else None
-            result["profile_initial_url"] = page.url
-            screenshot(page, "01-after-domcontentloaded.png")
-
-            # Observe the page in timed intervals to show redirects, overlays, and delayed UI.
-            for seconds, name in [(2, "02-after-2-seconds.png"),
-                                  (5, "03-after-5-seconds.png"),
-                                  (10, "04-after-10-seconds.png")]:
-                page.wait_for_timeout((seconds - (2 if seconds == 2 else 5 if seconds == 5 else 10)) * 1000
-                                      if False else (2000 if seconds == 2 else 3000 if seconds == 5 else 5000))
-                events.append({"time": stamp(), "type": "checkpoint", "label": name,
-                               "url": page.url, "title": page.title()})
-                screenshot(page, name)
-
+            page.wait_for_timeout(2500)
             result["profile_final_url"] = page.url
             result["profile_title"] = page.title()
-            result["profile_login_wall"] = is_login_wall(page)
-            result["profile_body_text"] = page.locator("body").inner_text(timeout=5000)[:3000]
-            screenshot(page, "05-login-wall-or-profile-diagnosis.png")
+            result["profile_login_wall"] = login_wall(page)
+            record_screenshot(page, "01-profile-loaded.png")
 
-            if not result["profile_login_wall"]:
+            if not result["profile_login_wall"] and not rate_limited:
+                result["signup_overlay_dismissed"] = close_signup_overlay(page)
+                page.wait_for_timeout(800)
+                record_screenshot(page, "02-profile-after-overlay.png")
+                result["profile_text_excerpt"] = page.locator("body").inner_text(timeout=5000)[:4000]
+
                 links = page.evaluate("""username => {
-                  const prefix = '/' + username + '/p/';
-                  return [...new Set([...document.querySelectorAll('a[href]')]
-                    .map(a => a.getAttribute('href'))
-                    .filter(h => h && h.startsWith(prefix))
-                    .map(h => new URL(h, location.origin).href.split('?')[0]))].slice(0, 12);
-                }""", USERNAME)
-                result["profile_post_links"] = links
-                for index, permalink in enumerate(links[:MAX_POSTS], start=1):
-                    post = {"index": index, "permalink": permalink, "started_at_utc": stamp()}
+                    const prefix = '/' + username.toLowerCase() + '/';
+                    return [...document.querySelectorAll('a[href]')]
+                      .map(a => a.href)
+                      .filter(h => {
+                        try {
+                          const u = new URL(h);
+                          const p = u.pathname.split('/').filter(Boolean);
+                          return u.hostname.endsWith('instagram.com') &&
+                            p.length >= 2 && ('/' + p[0].toLowerCase() + '/') === prefix &&
+                            ['p','reel','tv'].includes(p[1]) && !!p[2];
+                        } catch { return false; }
+                      });
+                }""", username)
+                profile_links = unique([u.split("?")[0].rstrip("/") + "/" for u in links])
+                result["profile_post_links"] = profile_links[:max_posts]
+
+                for index, permalink in enumerate(result["profile_post_links"], start=1):
+                    if rate_limited:
+                        break
+                    post = {"index": index, "permalink": permalink, "opened_at_utc": utc_now()}
                     try:
-                        post_response = page.goto(permalink, wait_until="domcontentloaded", timeout=35000)
-                        page.wait_for_timeout(2500)
-                        post["http_status"] = post_response.status if post_response else None
+                        response = page.goto(permalink, wait_until="domcontentloaded", timeout=35000)
+                        page.wait_for_timeout(POST_WAIT_MS)
+                        post["http_status"] = response.status if response else None
                         post["final_url"] = page.url
-                        post["login_wall"] = is_login_wall(page)
-                        screenshot(page, f"post-{index:02d}-loaded.png")
+                        post["login_wall"] = login_wall(page)
+                        if rate_limited:
+                            post["status"] = "rate_limited"
+                            result["posts"].append(post)
+                            break
                         if post["login_wall"]:
                             post["status"] = "login_wall"
-                        else:
-                            post["media"] = page.evaluate("""() => ({
-                              images: [...document.images].map(i => ({
-                                src: i.currentSrc || i.src, alt: i.alt || '',
+                            result["posts"].append(post)
+                            break
+
+                        post["metadata"] = page.evaluate("""() => {
+                          const meta = (selector) => document.querySelector(selector)?.content || null;
+                          const article = document.querySelector('article') || document.querySelector('main') || document.body;
+                          const times = [...article.querySelectorAll('time[datetime]')].map(x => x.dateTime).filter(Boolean);
+                          const captionCandidates = [
+                            meta('meta[property="og:description"]'),
+                            meta('meta[name="description"]'),
+                            article.innerText
+                          ].filter(Boolean);
+                          const images = [...article.querySelectorAll('img')].map(img => ({
+                            url: img.currentSrc || img.src || null,
+                            alt: img.alt || '',
+                            width: img.naturalWidth || 0,
+                            height: img.naturalHeight || 0
+                          })).filter(x => x.url && (x.width >= 120 || x.height >= 120));
+                          const videos = [...article.querySelectorAll('video')].map(v => ({
+                            url: v.currentSrc || v.src || null,
+                            poster: v.poster || null,
+                            width: v.videoWidth || 0,
+                            height: v.videoHeight || 0
+                          }));
+                          return {
+                            title: document.title,
+                            description: captionCandidates[0] || null,
+                            caption_text: captionCandidates[2] ? captionCandidates[2].slice(0, 5000) : null,
+                            posted_at: times[0] || null,
+                            canonical_url: document.querySelector('link[rel="canonical"]')?.href || location.href,
+                            og_image: meta('meta[property="og:image"]'),
+                            images, videos
+                          };
+                        }""")
+                        post["carousel_slides"] = []
+                        seen_slide_urls = set()
+                        for slide_number in range(MAX_CAROUSEL_SLIDES):
+                            slide_data = page.evaluate("""() => {
+                              const article = document.querySelector('article') || document.querySelector('main') || document.body;
+                              const imgs = [...article.querySelectorAll('img')].map(i => ({
+                                url: i.currentSrc || i.src || null, alt: i.alt || '',
                                 width: i.naturalWidth || 0, height: i.naturalHeight || 0
-                              })).filter(i => i.src),
-                              videos: [...document.querySelectorAll('video')].map(v => ({
-                                src: v.currentSrc || v.src, poster: v.poster || '',
-                                width: v.videoWidth || 0, height: v.videoHeight || 0
-                              }))
-                            })""")
-                            post["status"] = "media_found" if (
-                                post["media"]["images"] or post["media"]["videos"]
-                            ) else "no_rendered_media"
-                            screenshot(page, f"post-{index:02d}-media-state.png")
+                              })).filter(i => i.url && (i.width >= 250 || i.height >= 250));
+                              const next = [...article.querySelectorAll('button,[role="button"]')].find(b => {
+                                const label = ((b.getAttribute('aria-label') || '') + ' ' +
+                                  (b.getAttribute('title') || '')).toLowerCase();
+                                return label.includes('next');
+                              });
+                              return {images: imgs, hasNext: !!next};
+                            }""")
+                            for img in slide_data["images"]:
+                                if img["url"] not in seen_slide_urls:
+                                    seen_slide_urls.add(img["url"])
+                                    post["carousel_slides"].append(img)
+                            if not slide_data["hasNext"]:
+                                break
+                            try:
+                                next_button = page.locator('article button[aria-label*="Next" i], article [role="button"][aria-label*="Next" i], article button[title*="Next" i]').first
+                                if not next_button.is_visible(timeout=500):
+                                    break
+                                next_button.click(timeout=1200)
+                                page.wait_for_timeout(500)
+                            except Exception:
+                                break
+
+                        post["status"] = "media_found" if (
+                            post["metadata"].get("images") or post["metadata"].get("videos")
+                            or post["carousel_slides"]
+                        ) else "post_opened_no_media"
+                        record_screenshot(page, f"post-{index:02d}.png")
                     except PlaywrightTimeoutError:
                         post["status"] = "navigation_timeout"
-                        screenshot(page, f"post-{index:02d}-timeout.png")
                     except Exception as exc:
                         post["status"] = "error"
-                        post["error"] = repr(exc)[:1000]
-                        screenshot(page, f"post-{index:02d}-error.png")
-                    post["finished_at_utc"] = stamp()
+                        post["error"] = repr(exc)[:800]
+                    post["finished_at_utc"] = utc_now()
                     result["posts"].append(post)
-            else:
-                events.append({"time": stamp(), "type": "login_wall_detected",
-                               "url": page.url, "title": page.title()})
+                    if rate_limited:
+                        break
 
         except Exception as exc:
-            result["fatal_error"] = repr(exc)[:1500]
-            screenshot(page, "99-fatal-error.png")
+            result["fatal_error"] = repr(exc)[:1200]
         finally:
-            result["finished_at_utc"] = stamp()
+            result["finished_at_utc"] = utc_now()
+            result["rate_limited"] = rate_limited
+            result["screenshots"] = screenshots
             result["summary"] = {
                 "post_links_found": len(result.get("profile_post_links", [])),
                 "posts_opened": len(result["posts"]),
                 "posts_with_media": sum(1 for x in result["posts"] if x.get("status") == "media_found"),
-                "images_found": sum(len(x.get("media", {}).get("images", [])) for x in result["posts"]),
-                "videos_found": sum(len(x.get("media", {}).get("videos", [])) for x in result["posts"]),
+                "image_urls_found": sum(len(x.get("metadata", {}).get("images", [])) for x in result["posts"]),
+                "carousel_slide_urls_found": sum(len(x.get("carousel_slides", [])) for x in result["posts"]),
+                "video_urls_found": sum(len(x.get("metadata", {}).get("videos", [])) for x in result["posts"]),
             }
             result["overall_status"] = (
-                "login_wall" if result.get("profile_login_wall")
-                else "media_found" if result["summary"]["posts_with_media"]
-                else "no_media_found"
+                "rate_limited" if rate_limited else
+                "login_wall" if result.get("profile_login_wall") else
+                "media_found" if result["summary"]["posts_with_media"] else
+                "no_media_found"
             )
-            result["screenshots"] = screenshots
-            result["event_count"] = len(events)
-            (OUT / "events.json").write_text(json.dumps(events, indent=2), encoding="utf-8")
             (OUT / "report.json").write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")
-            context.tracing.stop(path=str(trace_path))
+            (OUT / "events.json").write_text(json.dumps(events, indent=2), encoding="utf-8")
+            context.tracing.stop(path=str(OUT / "playwright-trace.zip"))
             context.close()
             browser.close()
-            if page_video:
-                try:
-                    video_path = Path(page_video.path())
-                except Exception:
-                    video_path = None
-
-    # Playwright finalizes video when the context closes. Move it to a stable artifact name.
-    if video_path and video_path.exists():
-        shutil.move(str(video_path), str(OUT / "full-session.webm"))
-    temp_dir = OUT / "video-temp"
-    if temp_dir.exists():
-        shutil.rmtree(temp_dir, ignore_errors=True)
 
     print(json.dumps({
-        "username": USERNAME,
-        "overall_status": result["overall_status"],
-        "summary": result["summary"],
-        "profile_final_url": result.get("profile_final_url"),
-        "screenshots": len(screenshots),
-        "video": str(OUT / "full-session.webm") if (OUT / "full-session.webm").exists() else None,
-        "trace": str(trace_path),
+        "username": username,
+        "overall_status": result.get("overall_status"),
+        "summary": result.get("summary"),
+        "profile_url": result.get("profile_final_url"),
+        "rate_limited": result.get("rate_limited"),
+        "report": str(OUT / "report.json"),
         "events": str(OUT / "events.json"),
         "media_downloads": False,
         "database_writes": False,
