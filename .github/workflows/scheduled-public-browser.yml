@@ -44,6 +44,9 @@ jobs:
           python -m pip install --upgrade playwright
           python -m playwright install --with-deps chromium
 
+      - name: Validate collector syntax
+        run: python -m py_compile worker/public_browser_collector.py
+
       - name: Inspect public profile, posts, and visible carousel slides
         run: python worker/public_browser_collector.py
 
