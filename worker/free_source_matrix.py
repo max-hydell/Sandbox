@@ -155,7 +155,6 @@ if __name__ == "__main__":
     picmany_probe()
     instaloader_probe()
     ytdlp_probe()
-    gallery_dl_rs_probe()
     browser_probe()
     make_report()
     print("REPORT_READY artifacts/report.html")
