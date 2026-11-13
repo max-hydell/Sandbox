@@ -34,3 +34,7 @@ jobs:
           fi
       - name: Test public pages in Browserless
         run: python worker/browserless_diagnostics.py
+      - name: Extract public profile feed with BrowserQL (read-only)
+        run: |
+          python -m pip install requests
+          python worker/browserql_feed_test.py
