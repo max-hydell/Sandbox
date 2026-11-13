@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 18
     env:
-      TARGET_USERNAME: \${{ inputs.username }}
+      TARGET_USERNAME: ${{ inputs.username }}
       PYTHONUNBUFFERED: "1"
     steps:
       - uses: actions/checkout@v4
@@ -43,7 +43,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: sandbox-source-matrix-\${{ inputs.username }}
+          name: sandbox-source-matrix-${{ inputs.username }}
           path: artifacts/
           if-no-files-found: warn
           retention-days: 7
