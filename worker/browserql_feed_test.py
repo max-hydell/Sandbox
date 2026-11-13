@@ -83,7 +83,7 @@ class GridParser(HTMLParser):
 parser = GridParser(username)
 parser.feed(page_html)
 posts = parser.posts
-login_ui = bool(re.search(r"Log into Instagram|name=["']password["']|accounts/login", page_html, re.I))
+login_ui = bool(re.search(r"""Log into Instagram|name=["\']password["\']|accounts/login""", page_html, re.I))
 login_wall = not parser.hrefs and login_ui
 # Compact diagnostic snippets help distinguish login HTML from a rendered grid.
 username_pos = page_html.lower().find(username.lower())
