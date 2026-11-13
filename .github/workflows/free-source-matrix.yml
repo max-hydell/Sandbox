@@ -28,15 +28,6 @@ jobs:
         run: |
           python -m pip install --upgrade requests instaloader yt-dlp playwright
           python -m playwright install --with-deps chromium
-      - name: Install Rust
-        run: |
-          rustup update stable
-          rustc --version
-      - name: Build gallery-dl-rs experimental native extractor
-        run: |
-          git clone --depth 1 https://github.com/aagedal/gallery-dl-rs.git /tmp/gallery-dl-rs
-          cd /tmp/gallery-dl-rs
-          cargo build --release --locked
       - name: Run free anonymous source matrix
         run: python worker/free_source_matrix.py
       - name: Upload visual and diagnostic report
@@ -46,4 +37,45 @@ jobs:
           name: sandbox-source-matrix-${{ inputs.username }}
           path: artifacts/
           if-no-files-found: warn
+          retention-days: 7
+
+  gallery-dl-rs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      TARGET_USERNAME: ${{ inputs.username }}
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        run: |
+          rustup update stable
+          rustc --version
+          cargo --version
+      - name: Restore Rust build cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "/tmp/gallery-dl-rs -> target"
+      - name: Build experimental extractor (time-limited)
+        run: |
+          git clone --depth 1 https://github.com/aagedal/gallery-dl-rs.git /tmp/gallery-dl-rs
+          cd /tmp/gallery-dl-rs
+          timeout 480 cargo build --release --locked
+      - name: Run metadata-only extraction
+        if: success()
+        run: |
+          USERNAME="$(python -c 'import os,re; print(re.sub(r"[^A-Za-z0-9._]", "", os.environ["TARGET_USERNAME"]))')"
+          timeout 90 /tmp/gallery-dl-rs/target/release/gallery-dl-rs --extractor native -j --range 1-12 "https://www.instagram.com/$USERNAME/" > gallery-dl-rs.jsonl 2> gallery-dl-rs.stderr.txt
+          echo "Extracted records: $(wc -l < gallery-dl-rs.jsonl)"
+          head -c 12000 gallery-dl-rs.jsonl
+      - name: Upload Rust extractor diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gallery-dl-rs-diagnostic-${{ inputs.username }}
+          path: |
+            /tmp/gallery-dl-rs/target/release/gallery-dl-rs
+            gallery-dl-rs.jsonl
+            gallery-dl-rs.stderr.txt
+          if-no-files-found: ignore
           retention-days: 7
