@@ -314,6 +314,8 @@ def main():
         "media_downloads": False,
         "database_writes": False,
     }), flush=True)
+    if rate_limited:
+        raise SystemExit("Instagram returned HTTP 429; stopping without retry.")
 
 
 if __name__ == "__main__":
