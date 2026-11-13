@@ -22,7 +22,7 @@ mutation PublicProfileHTML {
       time
     }
   }
-  waitForTimeout(time: 1200) { time }
+  waitAfterClose: waitForTimeout(time: 1200) { time }
   html { html }
 }
 """ % profile_url
