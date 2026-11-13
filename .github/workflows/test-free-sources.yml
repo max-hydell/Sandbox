@@ -1,0 +1,29 @@
+name: Test free public Instagram sources
+on:
+  workflow_dispatch:
+    inputs:
+      username:
+        description: "Public Instagram username to test (read-only)"
+        required: true
+        type: string
+        default: "pickleballdotcom"
+permissions:
+  contents: read
+concurrency:
+  group: public-source-diagnostics
+  cancel-in-progress: false
+jobs:
+  diagnostics:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TARGET_USERNAME: ${{ inputs.username }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install diagnostic dependencies
+        run: python -m pip install requests instaloader
+      - name: Test free public sources without login
+        run: python worker/source_diagnostics.py
