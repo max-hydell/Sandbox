@@ -49,7 +49,7 @@ def picmany():
             except Exception:
                 result(label, "unexpected_response", f"HTTP {response.status_code}; non-JSON response")
         else:
-            cards = re.findall(r'<article\\b[^>]*class=["\\'][^"\\']*media-card', response.text, re.I)
+            cards = re.findall(r"<article\\b[^>]*class=['\\\"][^'\\\"]*media-card", response.text, re.I)
             result(label, "reachable", f"HTTP {response.status_code}; {len(cards)} media cards in first page")
 
 def instagram_logged_out():
@@ -58,7 +58,7 @@ def instagram_logged_out():
     if response is None:
         return
     html = response.text
-    match = re.search(r'<meta[^>]+name=["\\']description["\\'][^>]+content=["\\']([^"\\']*)', html, re.I)
+    match = re.search(r"<meta[^>]+name=['\\\"]description['\\\"][^>]+content=['\\\"]([^'\\\"]*)", html, re.I)
     description = unescape(match.group(1)) if match else ""
     if description and "log in" not in description.lower() and "create an account" not in description.lower():
         result("Instagram public profile HTML", "reachable", f"HTTP {response.status_code}; description metadata present ({len(description)} chars)")
