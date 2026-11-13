@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
-"""Read-only BrowserQL test for Instagram's logged-out public profile bootstrap.
+"""Read-only BrowserQL test for public Instagram profile grid posts.
 
-Extracts the embedded post IDs and nearby timestamps from public profile HTML.
-No Instagram credentials/cookies, interaction, scrolling, pagination, media downloads,
-or Supabase writes.
+Instagram may render the profile grid behind a signup modal. The modal alone is
+not treated as a login wall. This extracts only links whose path belongs to the
+requested username. No login, cookies, modal interaction, media downloads,
+pagination, or Supabase writes.
 """
+import html as html_lib
 import json
 import os
 import re
 import sys
 import requests
 
-username = re.sub(r"[^A-Za-z0-9._]", "", os.getenv("TARGET_USERNAME", "pickleballdotcom"))
+username = re.sub(r"[^A-Za-z0-9._]", "", os.getenv("TARGET_USERNAME", "nate_bestic"))
 token = os.environ["BROWSERLESS_TOKEN"]
 profile_url = f"https://www.instagram.com/{username}/"
 endpoint = "https://production-sfo.browserless.io/chromium/bql"
@@ -44,39 +46,60 @@ if payload.get("errors"):
 
 data = payload.get("data") or {}
 goto_status = (data.get("goto") or {}).get("status")
-html = ((data.get("html") or {}).get("html")) or ""
-if not html:
+page_html = ((data.get("html") or {}).get("html")) or ""
+if not page_html:
     raise RuntimeError("BrowserQL returned no HTML: " + json.dumps(payload)[:1500])
 
-# Keep the first occurrence/order of each post ID in the embedded bootstrap data.
-ids = list(dict.fromkeys(re.findall(r'"id"\s*:\s*"(POLARIS_[^"]+)"', html)))
-# Capture a timestamp only when it appears close to a matched post ID.
+# Profile grid entries are ordinary anchors, not necessarily POLARIS_* JSON IDs.
+anchor_pattern = re.compile(
+    r'<a\b(?=[^>]*\bhref=["\']/' + re.escape(username) +
+    r'/p/([^/"\']+)/?["\'])[^>]*>(.*?)</a>',
+    re.IGNORECASE | re.DOTALL,
+)
 posts = []
-for post_id in ids[:12]:
-    pos = html.find(post_id)
-    nearby = html[max(0, pos - 250):pos + 5000]
-    ts_match = re.search(r'"(?:taken_at|taken_at_timestamp|taken_at_ts)"\s*:\s*(\d{9,13})', nearby)
-    code_match = re.search(r'"code"\s*:\s*"([^"]+)"', nearby)
+seen = set()
+for match in anchor_pattern.finditer(page_html):
+    shortcode, body = match.group(1), match.group(2)
+    if shortcode in seen:
+        continue
+    seen.add(shortcode)
+    img = re.search(r'<img\b([^>]*)>', body, re.IGNORECASE | re.DOTALL)
+    attrs = img.group(1) if img else ""
+    alt_match = re.search(r'\balt=["\']([^"\']*)["\']', attrs, re.IGNORECASE)
+    src_match = re.search(r'\bsrc=["\']([^"\']+)["\']', attrs, re.IGNORECASE)
+    alt = html_lib.unescape(alt_match.group(1)) if alt_match else None
+    src = html_lib.unescape(src_match.group(1)) if src_match else None
+    date_match = re.search(r'\bon\s+(.+?)\.?$', alt or "", re.IGNORECASE)
     posts.append({
-        "id": post_id,
-        "timestamp": int(ts_match.group(1)) if ts_match else None,
-        "shortcode": code_match.group(1) if code_match else None,
+        "shortcode": shortcode,
+        "permalink": f"https://www.instagram.com/{username}/p/{shortcode}/",
+        "alt": alt,
+        "date_from_alt": date_match.group(1) if date_match else None,
+        "thumbnail_url": src,
+        "has_thumbnail": bool(src),
+        "is_carousel": "aria-label=\\"Carousel\\"" in body or "aria-label='Carousel'" in body,
     })
 
-cursors = list(dict.fromkeys(re.findall(r'"end_cursor"\s*:\s*"([^"]+)"', html)))
-login_wall = "accounts/login" in html.lower() or "Log into Instagram" in html
+# A signup modal can coexist with a fully rendered grid; only call it blocked
+# when no posts for the requested profile are present and login UI is present.
+login_ui_present = bool(re.search(
+    r'Log into Instagram|name=["\']password["\']|accounts/login',
+    page_html, re.IGNORECASE
+))
+login_wall = len(posts) == 0 and login_ui_present
 result = {
-    "test": "browserql_public_profile_bootstrap_read_only",
+    "test": "browserql_public_profile_grid_read_only",
     "username": username,
     "http_status": goto_status,
-    "html_chars": len(html),
+    "html_chars": len(page_html),
+    "signup_modal_text_present": "See photos, videos and more" in page_html,
     "login_wall_detected": login_wall,
-    "unique_post_ids_found": len(ids),
-    "posts": posts,
-    "pagination_cursor_present": bool(cursors),
+    "unique_profile_posts_found": len(posts),
+    "posts": posts[:12],
     "database_writes": False,
     "instagram_login_used": False,
-    "result": "PASS" if len(ids) >= 1 and not login_wall else "FAIL",
+    "media_downloads": False,
+    "result": "PASS" if posts and any(p["has_thumbnail"] for p in posts) else "FAIL",
 }
 print(json.dumps(result, ensure_ascii=False, indent=2))
 if result["result"] != "PASS":
