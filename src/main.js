@@ -59,9 +59,24 @@ function renderHome(host) {
   hydrateMedia();
 }
 function postCard(p) {
-  const img = p.image_paths?.[0] ? p.image_paths[0] : p.image_url || '';
+  const mediaPaths = (p.image_paths || []).filter(Boolean);
+  const img = mediaPaths[0] || p.image_url || '';
+  let mediaMarkup = '<div class="media-placeholder">MEDIA NOT AVAILABLE</div>';
+  if (mediaPaths.length > 1) {
+    const slides = mediaPaths.map((path, index) =>
+      '<img class="post-image carousel-slide" data-media-path="'+esc(path)+'" alt="Image '+(index+1)+' of '+mediaPaths.length+' in post by @'+esc(p.username)+'" loading="lazy"/>'
+    ).join('');
+    mediaMarkup = '<div class="post-carousel" data-carousel><div class="carousel-track" data-carousel-track>'+slides+'</div>' +
+      '<button class="carousel-arrow carousel-prev" type="button" data-carousel-prev aria-label="Previous image" disabled>‹</button>' +
+      '<button class="carousel-arrow carousel-next" type="button" data-carousel-next aria-label="Next image">›</button>' +
+      '<span class="carousel-count" data-carousel-count>1 / '+mediaPaths.length+'</span></div>';
+  } else if (mediaPaths.length === 1) {
+    mediaMarkup = '<img class="post-image" data-media-path="'+esc(img)+'" alt="Post by @'+esc(p.username)+'" loading="lazy"/>';
+  } else if (img) {
+    mediaMarkup = '<img class="post-image" src="'+esc(img)+'" alt="Post by @'+esc(p.username)+'" loading="lazy"/>';
+  }
   return `<article class="post"><div class="post-head"><div class="avatar">${initials(p.username)}</div><div class="post-user"><button class="profile-link" data-profile="${esc(p.username)}">@${esc(p.username)}</button><small>${dateLabel(p.posted_at||p.discovered_at)}</small></div>${p.is_new?'<span class="new-pill">NEW</span>':''}<a class="open-link" href="${esc(p.post_url||'#')}" target="_blank" rel="noreferrer">↗</a></div>
-  ${img?(p.image_paths?.[0]?'<img class="post-image" data-media-path="'+esc(img)+'" alt="Post by @'+esc(p.username)+'" loading="lazy"/>':'<img class="post-image" src="'+esc(img)+'" alt="Post by @'+esc(p.username)+'" loading="lazy"/>'):'<div class="media-placeholder">MEDIA NOT AVAILABLE</div>'}
+  ${mediaMarkup}
   <div class="post-actions"><button data-like="${p.id}" class="like ${p.liked?'liked':''}">${p.liked?'♥':'♡'} <span>${p.liked?'Liked':'Like'}</span></button><span class="post-type">${esc(p.media_type||'post')}</span></div>
   <p class="caption"><b>@${esc(p.username)}</b> ${esc(p.caption||'')}</p></article>`;
 }
@@ -69,6 +84,28 @@ async function hydrateMedia(){for(const img of document.querySelectorAll('[data-
 function bindPostActions(){
   document.querySelectorAll('[data-like]').forEach(b=>b.addEventListener('click',async()=>{const p=posts.find(x=>x.id===b.dataset.like);if(!p)return;const liked=!p.liked;const {error}=await supabase.from('posts').update({liked}).eq('id',p.id);if(!error){p.liked=liked;render();}}));
   document.querySelectorAll('[data-profile]').forEach(b=>b.addEventListener('click',()=>{activeProfile=b.dataset.profile;render();}));
+  bindCarouselActions();
+}
+function bindCarouselActions(){
+  document.querySelectorAll('[data-carousel]').forEach(carousel=>{
+    const track=carousel.querySelector('[data-carousel-track]');
+    const prev=carousel.querySelector('[data-carousel-prev]');
+    const next=carousel.querySelector('[data-carousel-next]');
+    const count=carousel.querySelector('[data-carousel-count]');
+    if(!track||!prev||!next)return;
+    const slides=track.querySelectorAll('.carousel-slide');
+    const update=()=>{
+      const width=track.clientWidth||1;
+      const index=Math.max(0,Math.min(slides.length-1,Math.round(track.scrollLeft/width)));
+      if(count)count.textContent=(index+1)+' / '+slides.length;
+      prev.disabled=index===0;
+      next.disabled=index===slides.length-1;
+    };
+    prev.addEventListener('click',()=>track.scrollBy({left:-track.clientWidth,behavior:'smooth'}));
+    next.addEventListener('click',()=>track.scrollBy({left:track.clientWidth,behavior:'smooth'}));
+    track.addEventListener('scroll',()=>requestAnimationFrame(update),{passive:true});
+    update();
+  });
 }
 function renderProfile(host) {
   const username = activeProfile;
