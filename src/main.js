@@ -11,9 +11,7 @@ let accounts = [];
 let posts = [];
 let busy = false;
 let activeProfile = null;
-const FEED_CUTOFF = new Date('2026-08-01T00:00:00');
-const afterFeedCutoff = p => { const d = new Date(p.posted_at); return Number.isFinite(d.getTime()) && d >= FEED_CUTOFF; };
-const feedPosts = () => posts.filter(p => afterFeedCutoff(p) && !(p.media_type === 'story' && p.expires_at && new Date(p.expires_at) <= new Date()));
+const feedPosts = () => posts.filter(p => !(p.media_type === 'story' && p.expires_at && new Date(p.expires_at) <= new Date()));
 
 const esc = (v='') => String(v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const initials = (s='?') => esc(s.replace(/^@/,'').slice(0,2).toUpperCase());
@@ -52,7 +50,7 @@ function renderAuth(host) {
 }
 
 function renderHome(host) {
-  host.innerHTML = `<section class="page-head"><div><div class="eyebrow">YOUR FEED</div><h1>Latest posts</h1><p>Posts and Stories published since August 1, 2026</p></div><span class="count">${feedPosts().filter(p=>!p.liked).length} POSTS</span></section>
+  host.innerHTML = `<section class="page-head"><div><div class="eyebrow">YOUR FEED</div><h1>Latest posts</h1><p>All saved posts and unexpired Stories</p></div><span class="count">${feedPosts().filter(p=>!p.liked).length} POSTS</span></section>
   <div id="feed-list">${feedPosts().filter(p=>!p.liked).length?feedPosts().filter(p=>!p.liked).map(postCard).join(''):'<div class="empty"><div class="empty-icon">✓</div><h3>You’re all caught up</h3><p>New posts will appear once a supported public-post source adds them. Liked posts are kept in your archive.</p><button class="primary" id="go-watch">View profiles</button></div>'}</div>`;
   $('#go-watch')?.addEventListener('click',()=>{activeTab='watchlist';render();});
   bindPostActions();
@@ -111,9 +109,9 @@ function renderProfile(host) {
   const username = activeProfile;
   const account = accounts.find(a=>a.username.toLowerCase()===username.toLowerCase());
   const profilePosts = posts.filter(p=>p.username.toLowerCase()===username.toLowerCase());
-  host.innerHTML = '<section class="page-head profile-head"><div><button class="back-link" id="back-feed">← Back</button><div class="eyebrow">PUBLIC PROFILE</div><h1>@'+esc(username)+'</h1><p>Posts published since August 1, 2026</p></div><span class="count">'+profilePosts.length+' POSTS</span></section>' +
+  host.innerHTML = '<section class="page-head profile-head"><div><button class="back-link" id="back-feed">← Back</button><div class="eyebrow">PUBLIC PROFILE</div><h1>@'+esc(username)+'</h1><p>All saved posts</p></div><span class="count">'+profilePosts.length+' POSTS</span></section>' +
     '<div class="profile-summary"><span class="avatar">'+initials(username)+'</span><div><b>@'+esc(username)+'</b><small>'+(account?statusLabel(account.status):'Saved profile')+'</small></div></div>' +
-    '<div id="profile-posts">'+(profilePosts.length?profilePosts.map(postCard).join(''):'<div class="empty compact">No saved posts from this profile since August 1, 2026.</div>')+'</div>';
+    '<div id="profile-posts">'+(profilePosts.length?profilePosts.map(postCard).join(''):'<div class="empty compact">No saved posts from this profile yet.</div>')+'</div>';
   $('#back-feed').addEventListener('click',()=>{activeProfile=null;render();});
   bindPostActions();
   hydrateMedia();
